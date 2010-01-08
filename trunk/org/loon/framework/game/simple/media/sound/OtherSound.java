@@ -10,7 +10,6 @@ import javax.sound.sampled.DataLine;
 import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.SourceDataLine;
 
-import org.loon.framework.game.simple.core.LSystem;
 import org.loon.framework.game.simple.core.resource.Resources;
 
 /**
@@ -36,11 +35,9 @@ import org.loon.framework.game.simple.core.resource.Resources;
 // 非特定解码器播放用类
 public class OtherSound implements Sound {
 
-	private SourceDataLine line;
+	private SourceDataLine clip;
 
-	private InputStream is;
-
-	private boolean running;
+	private boolean isRunning;
 
 	private float volume;
 
@@ -48,15 +45,6 @@ public class OtherSound implements Sound {
 		setSoundVolume(Sound.defaultMaxVolume);
 	}
 
-	public void run() {
-		while (running && is != null) {
-			playSound(is);
-			try {
-				Thread.sleep(LSystem.SECOND);
-			} catch (InterruptedException e) {
-			}
-		}
-	}
 
 	public void playSound(String fileName) {
 		playSound(Resources.getResourceToInputStream(fileName));
@@ -67,8 +55,7 @@ public class OtherSound implements Sound {
 			return;
 		}
 
-		this.is = is;
-		this.running = true;
+		this.isRunning = true;
 
 		AudioInputStream din = null;
 		AudioInputStream in = null;
@@ -116,28 +103,26 @@ public class OtherSound implements Sound {
 			volume = 1.0f;
 		}
 		byte[] data = new byte[4096];
-
 		try {
-			line = getLine(trgFormat);
-			if (line == null) {
+			clip = getLine(trgFormat);
+			if (clip == null) {
 				return;
 			}
-			line.start();
-
+			clip.start();
 			int nBytesRead = 0;
-			while (running && (nBytesRead != -1)) {
+			while (isRunning && (nBytesRead != -1)) {
 				nBytesRead = din.read(data, 0, data.length);
-
-				for (int i = 0; i < nBytesRead; i++)
+				for (int i = 0; i < nBytesRead; i++){
 					data[i] *= volume;
-
-				if (nBytesRead != -1)
-					line.write(data, 0, nBytesRead);
+				}
+				if (nBytesRead != -1){
+					clip.write(data, 0, nBytesRead);
+				}
 			}
 		} finally {
-			line.drain();
-			line.stop();
-			line.close();
+			clip.drain();
+			clip.stop();
+			clip.close();
 			din.close();
 		}
 	}
@@ -156,11 +141,10 @@ public class OtherSound implements Sound {
 	}
 
 	public void stopSound() {
-		if (line != null) {
-			line.stop();
+		if (clip != null) {
+			clip.stop();
 		}
-		is = null;
-		running = false;
+		isRunning = false;
 	}
 
 	public boolean isVolumeSupported() {
