@@ -36,7 +36,7 @@ import org.loon.framework.game.simple.core.resource.Resources;
  * @version 0.1
  */
 
-public class LWaveSound implements LineListener, Sound  {
+public class LWaveSound extends Thread implements LineListener, Sound {
 
 	private Clip clip;
 
@@ -52,15 +52,19 @@ public class LWaveSound implements LineListener, Sound  {
 
 	private static final int INITIALIZED = 2;
 
+	private boolean isRunning;
+
 	private int volume;
 
 	private static int rendererStatus = UNINITIALIZED;
 
 	public LWaveSound() {
+
 		if (rendererStatus == UNINITIALIZED) {
 			rendererStatus = INITIALIZING;
 		}
 		setSoundVolume(Sound.defaultMaxVolume);
+
 	}
 
 	public boolean isAvailable() {
@@ -80,17 +84,22 @@ public class LWaveSound implements LineListener, Sound  {
 		return available;
 	}
 
+	public boolean isStopped() {
+		return isRunning;
+	}
+
 	public void playSound(String fileName) {
 		playSound(Resources.getResourceToInputStream(fileName));
 	}
 
-	public void playSound(InputStream in) {
-
+	public void playSound(final InputStream in) {
 		try {
+			stopSound();
 			if (this.clip != null) {
 				this.clip.drain();
 				this.clip.close();
 			}
+
 			AudioInputStream ain = AudioSystem.getAudioInputStream(in);
 			AudioFormat format = ain.getFormat();
 
@@ -117,12 +126,18 @@ public class LWaveSound implements LineListener, Sound  {
 			this.clip.open(ain);
 			this.setSoundVolume(volume);
 			this.clip.start();
+			this.isRunning = true;
+			this.start();
 		} catch (Exception e) {
-			e.printStackTrace();
 		}
 	}
 
+	public void interrupt() {
+		isRunning = false;
+	}
+
 	public void stopSound() {
+		interrupt();
 		if (this.clip != null) {
 			this.clip.stop();
 			this.clip.setMicrosecondPosition(0);
@@ -159,9 +174,24 @@ public class LWaveSound implements LineListener, Sound  {
 		}
 	}
 
+	public void run() {
+		while (isRunning) {
+			do {
+				try {
+					Thread.sleep(50L);
+				} catch (InterruptedException e) {
+				}
+			} while (clip != null && clip.isRunning());
+			try {
+				Thread.sleep(100L);
+			} catch (InterruptedException e) {
+			}
+		}
+		stopSound();
+	}
+
 	public boolean isVolumeSupported() {
 		return volumeSupported;
 	}
-
 
 }
