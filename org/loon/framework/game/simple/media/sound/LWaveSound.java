@@ -1,17 +1,16 @@
 package org.loon.framework.game.simple.media.sound;
 
+import java.io.IOException;
 import java.io.InputStream;
 
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.Clip;
 import javax.sound.sampled.Control;
 import javax.sound.sampled.DataLine;
 import javax.sound.sampled.FloatControl;
-import javax.sound.sampled.LineEvent;
-import javax.sound.sampled.LineListener;
-import javax.sound.sampled.Mixer;
+import javax.sound.sampled.LineUnavailableException;
+import javax.sound.sampled.SourceDataLine;
 
 import org.loon.framework.game.simple.core.resource.Resources;
 
@@ -35,72 +34,38 @@ import org.loon.framework.game.simple.core.resource.Resources;
  * @email：ceponline@yahoo.com.cn
  * @version 0.1
  */
+public class LWaveSound implements Sound {
 
-public class LWaveSound extends Thread implements LineListener, Sound {
-
-	private Clip clip;
-
-	private static boolean available;
-
-	private static boolean volumeSupported;
-
-	private static Mixer mixer;
-
-	private static final int UNINITIALIZED = 0;
-
-	private static final int INITIALIZING = 1;
-
-	private static final int INITIALIZED = 2;
+	private SourceDataLine clip;
 
 	private boolean isRunning;
 
-	private int volume;
-
-	private static int rendererStatus = UNINITIALIZED;
+	private float volume;
 
 	public LWaveSound() {
-
-		if (rendererStatus == UNINITIALIZED) {
-			rendererStatus = INITIALIZING;
-		}
 		setSoundVolume(Sound.defaultMaxVolume);
-
-	}
-
-	public boolean isAvailable() {
-		if (rendererStatus != INITIALIZED) {
-			int i = 0;
-			while (rendererStatus != INITIALIZED && i++ < 50) {
-				try {
-					Thread.sleep(50L);
-				} catch (InterruptedException e) {
-				}
-			}
-			if (rendererStatus != INITIALIZED) {
-				rendererStatus = INITIALIZED;
-				available = false;
-			}
-		}
-		return available;
-	}
-
-	public boolean isStopped() {
-		return isRunning;
 	}
 
 	public void playSound(String fileName) {
 		playSound(Resources.getResourceToInputStream(fileName));
 	}
 
-	public void playSound(final InputStream in) {
-		try {
-			stopSound();
-			if (this.clip != null) {
-				this.clip.drain();
-				this.clip.close();
-			}
+	public void playSound(InputStream is) {
+		if (is == null) {
+			return;
+		}
 
-			AudioInputStream ain = AudioSystem.getAudioInputStream(in);
+		isRunning = true;
+
+		AudioInputStream ain = null;
+
+		try {
+
+			ain = AudioSystem.getAudioInputStream(is);
+
+			if (ain == null) {
+				return;
+			}
 			AudioFormat format = ain.getFormat();
 
 			if ((format.getEncoding() == AudioFormat.Encoding.ULAW)
@@ -115,83 +80,79 @@ public class LWaveSound extends Thread implements LineListener, Sound {
 				format = temp;
 			}
 
-			DataLine.Info info = new DataLine.Info(Clip.class, ain.getFormat(),
-					((int) ain.getFrameLength() * format.getFrameSize()));
-			if (mixer != null) {
-				this.clip = (Clip) mixer.getLine(info);
-			} else {
-				this.clip = (Clip) AudioSystem.getLine(info);
-			}
-			this.clip.addLineListener(this);
-			this.clip.open(ain);
-			this.setSoundVolume(volume);
-			this.clip.start();
-			this.isRunning = true;
-			this.start();
+			rawplay(format, ain, volume);
 		} catch (Exception e) {
-		}
-	}
 
-	public void interrupt() {
-		isRunning = false;
-	}
-
-	public void stopSound() {
-		interrupt();
-		if (this.clip != null) {
-			this.clip.stop();
-			this.clip.setMicrosecondPosition(0);
-			this.clip.removeLineListener(this);
-		}
-	}
-
-	public void update(LineEvent e) {
-		if (e.getType() == LineEvent.Type.STOP) {
-			this.clip.stop();
-			this.clip.setMicrosecondPosition(0);
-			this.clip.removeLineListener(this);
+		} finally {
+			if (ain != null) {
+				try {
+					ain.close();
+				} catch (Exception e) {
+				}
+			}
 		}
 	}
 
 	public void setSoundVolume(int volume) {
 		this.volume = volume;
-		if (this.clip == null) {
-			return;
-		}
-		Control.Type vol1 = FloatControl.Type.VOLUME, vol2 = FloatControl.Type.MASTER_GAIN;
-		FloatControl c = (FloatControl) clip
-				.getControl(FloatControl.Type.MASTER_GAIN);
-		float min = c.getMinimum();
-		float v = volume * (c.getMaximum() - min) / 100f + min;
-		if (this.clip.isControlSupported(vol1)) {
-			FloatControl volumeControl = (FloatControl) this.clip
-					.getControl(vol1);
-			volumeControl.setValue(v);
-		} else if (this.clip.isControlSupported(vol2)) {
-			FloatControl gainControl = (FloatControl) this.clip
-					.getControl(vol2);
-			gainControl.setValue(v);
+	}
+
+	private void rawplay(AudioFormat trgFormat, AudioInputStream ain,
+			float volume) throws IOException, LineUnavailableException {
+		byte[] data = new byte[8192];
+		try {
+			clip = getLine(ain, trgFormat);
+			if (clip == null) {
+				return;
+			}
+			Control.Type vol1 = FloatControl.Type.VOLUME, vol2 = FloatControl.Type.MASTER_GAIN;
+			FloatControl c = (FloatControl) clip
+					.getControl(FloatControl.Type.MASTER_GAIN);
+			float min = c.getMinimum();
+			float v = volume * (c.getMaximum() - min) / 100f + min;
+			if (this.clip.isControlSupported(vol1)) {
+				FloatControl volumeControl = (FloatControl) this.clip
+						.getControl(vol1);
+				volumeControl.setValue(v);
+			} else if (this.clip.isControlSupported(vol2)) {
+				FloatControl gainControl = (FloatControl) this.clip
+						.getControl(vol2);
+				gainControl.setValue(v);
+			}
+			clip.start();
+			int nBytesRead = 0;
+			while (isRunning && (nBytesRead != -1)) {
+				nBytesRead = ain.read(data, 0, data.length);
+				if (nBytesRead != -1) {
+					clip.write(data, 0, nBytesRead);
+				}
+			}
+		} finally {
+			clip.drain();
+			clip.stop();
+			clip.close();
+			ain.close();
 		}
 	}
 
-	public void run() {
-		while (isRunning) {
-			do {
-				try {
-					Thread.sleep(50L);
-				} catch (InterruptedException e) {
-				}
-			} while (clip != null && clip.isRunning());
-			try {
-				Thread.sleep(100L);
-			} catch (InterruptedException e) {
-			}
+	private SourceDataLine getLine(AudioInputStream ain, AudioFormat audioFormat)
+			throws LineUnavailableException {
+		DataLine.Info info = new DataLine.Info(SourceDataLine.class, ain
+				.getFormat(), ((int) ain.getFrameLength() * audioFormat
+				.getFrameSize()));
+		clip = (SourceDataLine) AudioSystem.getLine(info);
+		clip.open(audioFormat);
+		return clip;
+	}
+
+	public void stopSound() {
+		if (clip != null) {
+			clip.stop();
 		}
-		stopSound();
+		isRunning = false;
 	}
 
 	public boolean isVolumeSupported() {
-		return volumeSupported;
+		return true;
 	}
-
 }
